@@ -1,0 +1,362 @@
+import urllib.request
+from urllib import request
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from pandas.io.json import json_normalize
+from collections import OrderedDict
+import calendar
+from datetime import date
+import json
+import gzip
+
+def parse(path):
+    g = gzip.open(path, 'rb')
+    for l in g:
+        yield eval(l)
+
+def getDF(path):
+    i = 0
+    df = {}
+    for d in parse(path):
+        df[i] = d
+        i += 1
+    return pd.DataFrame.from_dict(df, orient='index')
+
+reviewDF = getDF('/Users/kwhood/Project/reviews_Electronics_5.json.gz')
+display(reviewDF)
+# returns 1,689,188 rows and 9 columns
+
+# checking for NaN and missing values
+pd.isna(reviewDF)
+pd.isnull(reviewDF)
+reviewDF.isnull().sum(axis = 0)
+# returns that there are 24,730 missing reviewrNames, although this is not a big deal at the moment, as the reviewer name might not be something that is analyzed
+# the missing values in the reviewerName column totals 1.46% of the data and can be removed
+reviewDF.isnull().sum(axis = 1)
+# nothing shown to be missing in the rows at this time
+
+# removing the 24,730 rows with the missing reviewerNames (only 1.46% of the total data and should not have an impact on the rest of the data)
+reviewDF2 = reviewDF.dropna()
+display(reviewDF2)
+#results in 1,664,458 rows and 9 columns
+print(reviewDF2.columns)
+print(reviewDF2.head(7))
+
+
+frame = [reviewDF2.reviewText]
+print(frame)
+
+# word cloud
+from wordcloud import WordCloud
+import PIL
+import itertools
+
+complete_review = pd.concat(frame, keys=['electronics'])
+review_names = ['electronics']
+for reviews, name in zip(frame, review_names):
+    raw_str = complete_review.loc[name].str.cat(sep=',')
+    wordcloud = WordCloud(max_words=800, margin=0).generate(raw_str)
+    plt.figure()
+    plt.imshow(wordcloud, interpolation='bilinear')
+    plt.axis('off')
+    plt.show()
+
+
+# cleaning data set
+# Preprocessing of text in reviewText column making all words lower case 
+reviewDF2['reviewText'] = reviewDF2['reviewText'].apply(lambda x: " ".join(x.lower() for x in x.split()))
+reviewDF2['reviewText'].head(5)
+
+# Removal of punctuation
+reviewDF2['reviewText'] = reviewDF2['reviewText'].str.replace('[^\w\s]','')
+reviewDF2['reviewText'].head(5)
+
+# removing stop words
+import nltk
+nltk.download('stopwords')
+from nltk.corpus import stopwords
+stop = stopwords.words('english')
+reviewDF2['reviewText'] = reviewDF2['reviewText'].apply(lambda x: " ".join(x for x in x.split() if x not in stop))
+reviewDF2['reviewText'].head(4)
+
+# removing common words
+# looking to see what the top 50 common words are
+common = pd.Series(''.join(reviewDF2['reviewText']).split()).value_counts()[:50]
+common
+# now removing these words because they will not be of use when classification occurs
+reviewDF2['reviewText']=reviewDF2['reviewText'].apply(lambda x: " ".join(x for x in x.split() if x not in common))
+reviewDF2['reviewText'].head(4)
+
+# removing rare words
+rare = pd.Series(''.join(reviewDF2['reviewText']).split()).value_counts()[-50:]
+rare
+rare = list(rare.index)
+reviewDF2['reviewText']=reviewDF2['reviewText'].apply(lambda x: " ".join(x for x in x.split() if x not in rare))
+reviewDF2['reviewText'].head(4)
+
+# using textblob this will correct any misspelled words
+from textblob import TextBlob
+reviewDF2['reviewText'][:5].apply(lambda x: str(TextBlob(x).correct()))
+
+# tokenization applied to make the blob that was just created and convert them into series of words
+TextBlob(reviewDF2['reviewText'][1]).words
+
+# creating bigrams
+TextBlob(reviewDF2['reviewText'][0]).ngrams(2)
+
+# Creating the term frequency (number of times the term appears in each row/ number of terms in the row)
+termFreq = (reviewDF2['reviewText'][1:2]).apply(lambda x: pd.value_counts(x.split(" "))).sum(axis = 0).reset_index()
+termFreq.columns = ['words','Term_Frequency']
+termFreq
+
+#using calendar to create a new column for year, month, day of week
+print(reviewDF2['reviewTime'].dtype)
+reviewDF2['reviewTime'] = pd.to_datetime(reviewDF2['reviewTime'])
+print(reviewDF2['reviewTime'].dtype)
+
+reviewDF2['year'] = reviewDF2['reviewTime'].dt.year
+reviewDF2['month'] = (reviewDF2['reviewTime'].dt.month).apply(lambda x: calendar.month_abbr[x])
+reviewDF2['day'] = reviewDF2['reviewTime'].dt.weekday_name
+reviewDF2['day'] = pd.Categorical(reviewDF2['day'], categories=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'], ordered=True)
+reviewDF2.head(4)
+
+# Reviews per day of week
+current_palette = sns.color_palette('bright')
+popDays = sns.countplot(x='day', data=reviewDF2), plt.xticks(rotation='vertical'),plt.ylabel('Number of Reviews by Day'), (sns.color_palette(current_palette))
+
+# reviews per month
+popMon = sns.countplot(x='month', data=reviewDF2), plt.xticks(rotation='vertical'),plt.ylabel('Number of Reviews per Month')
+
+# reviews per year
+popYear = sns.countplot(x='year', data=reviewDF2), plt.xticks(rotation='vertical'),plt.ylabel('Number of Reviews per Year')
+
+
+# Sentiment Analysis
+reviewDF2['reviewText'][:5].apply(lambda x: TextBlob(x).sentiment)
+reviewDF2['sentiment'] = reviewDF2['reviewText'].apply(lambda x: TextBlob(x).sentiment[0])
+reviewDF2[['reviewText', 'sentiment']].head(4)
+
+# breaking the overall column into 3 different categories depending on review (good, neutral, bad)
+reviewDF2['good'] = np.where(reviewDF2['overall'] >= 4, 'yes','no')
+reviewDF2['neutral'] = np.where(reviewDF2['overall'] == 3, 'yes','no')
+reviewDF2['bad'] = np.where(reviewDF2['overall'] <= 2, 'yes','no')
+
+reviewDF2.head(10)
+
+# word clouds for each category of overall review rating
+# Good Word Cloud
+frame = [reviewDF2.reviewText, reviewDF2.good]
+print(frame)
+complete_review = pd.concat(frame, keys=['reviewText','good'])
+review_names = ['reviewText','good']
+for reviews, name in zip(frame, review_names):
+    raw_str = complete_review.loc[name].str.cat(sep=',')
+    wordcloud = WordCloud(max_words=800, margin=0).generate(raw_str)
+    plt.figure()
+    plt.imshow(wordcloud, interpolation='bilinear')
+    plt.axis('off')
+    plt.show()
+
+# Neutral Word Cloud
+frame2 = [reviewDF2.reviewText, reviewDF2.neutral]
+print(frame2)
+complete_review2 = pd.concat(frame2, keys=['reviewText','neutral'])
+review_names2 = ['reviewText','neutral']
+for reviews, name in zip(frame2, review_names2):
+    raw_str2 = complete_review2.loc[name].str.cat(sep=',')
+    wordcloud2 = WordCloud(max_words=800, margin=0).generate(raw_str2)
+    plt.figure()
+    plt.imshow(wordcloud2, interpolation='bilinear')
+    plt.axis('off')
+    plt.show()
+
+# Bad Word Cloud
+frame3 = [reviewDF2.reviewText, reviewDF2.bad]
+print(frame3)
+complete_review3 = pd.concat(frame3, keys=['reviewText','bad'])
+review_names3 = ['reviewText','neutral']
+for reviews, name in zip(frame3, review_names3):
+    raw_str3 = complete_review3.loc[name].str.cat(sep=',')
+    wordcloud3 = WordCloud(max_words=800, margin=0).generate(raw_str3)
+    plt.figure()
+    plt.imshow(wordcloud3, interpolation='bilinear')
+    plt.axis('off')
+    plt.show()
+
+# coding: utf-8
+
+# In[2]:
+from pyspark.sql import SparkSession
+
+spark = SparkSession     .builder     .getOrCreate()
+
+
+# In[2]:
+from pyspark import SparkConf, SparkContext
+from pyspark.sql import *
+from pyspark.sql.functions import *
+from pyspark.ml.feature import Bucketizer
+from pyspark.sql import Window
+from pyspark.sql.functions import col
+
+
+# In[3]:
+sc = spark.sparkContext
+
+# In[4]:
+sc._conf.getAll()
+
+# In[5]:
+spark.version
+
+# For our purposes there might not be any gain from reviews where there wasn't any rating of the reviews so omit for now 
+
+# In[6]:
+df = spark.read.json("reviews_Electronics_5.json.gz")\
+
+# In[7]:
+df_array = df.filter("helpful[1]>0").selectExpr("*","helpful[0] as positive","helpful[1] as totalReviews","helpful[0]/helpful[1] as helpfulnessRatio")
+
+# In[8]:
+df_array.head()
+
+# In[30]:
+df_array.show()
+
+# helpfulnessBucket|min(helpfulnessRatio)|max(helpfulnessRatio)|
+# +-----------------+---------------------+---------------------+
+# |              0.0|                  0.0|  0.32894736842105265|
+# |              1.0|   0.3333333333333333|   0.6694915254237288|
+# |              2.0|   0.6702702702702703|                  1.0
+
+# In[9]:
+bucketizer = Bucketizer(splits=[0,0.33,0.67,1],inputCol="helpfulnessRatio",outputCol="helpfulnessBucket")
+
+# In[10]:
+df_bucket = bucketizer.transform(df_array)
+
+# In[11]:
+df_bucket.select("positive","totalReviews","helpfulnessRatio","helpfulnessBucket").show()
+
+# In[12]:
+df_bucket.groupBy("helpfulnessBucket").agg(min("helpfulnessRatio"),max("helpfulnessRatio")).show()
+
+# In[13]:
+df_bucket    .groupBy("helpfulnessBucket")    .count()    .show()
+
+# calculated in excel because didn't want to have to implement window function to find count - min(count) and percentages 
+
+# In[14]:
+df_bucket_sample = df_bucket.sampleBy("helpfulnessBucket",fractions={0:1,1:0.903008661,2:0.222606274})
+
+# In[15]:
+df_bucket_sample    .groupBy("helpfulnessBucket")    .count()    .show()
+
+# In[16]:
+df_bucket_sample_train = df_bucket_sample.sampleBy("helpfulnessBucket",fractions={0:0.67,1:0.67,2:0.67})
+
+# sampling and writing out to parquet to run once and have common result set. commented out as to not run again accidentally 
+
+# df_bucket_sample_train.coalesce(1).write.mode("overwrite").format("parquet").save("train")
+
+# df_bucket_sample.subtract(df_bucket_sample_train).coalesce(1).write.mode("overwrite").format("parquet").save("test")
+
+# In[17]:
+train = spark.read.parquet("train")
+test  = spark.read.parquet("test")
+
+# In[18]:
+train.groupBy("helpfulnessBucket").count().sort(desc("helpfulnessBucket")).show()
+
+# In[19]:
+test.groupBy("helpfulnessBucket").count().sort(desc("helpfulnessBucket")).show()
+
+# In[20]:
+from pyspark.ml.feature import RegexTokenizer, Tokenizer, IDF, HashingTF, StopWordsRemover
+
+# In[21]:
+regexTokenizer =  RegexTokenizer(inputCol="reviewText",outputCol="documentRegex",pattern="\\W")
+
+# In[22]:
+remover   =  StopWordsRemover(inputCol="documentRegex",outputCol="documentWordsFiltered")
+
+# In[23]:
+hashingTF = HashingTF(inputCol="documentWordsFiltered",outputCol="wordsHashed",numFeatures=1000)
+
+# In[24]:
+idf =  IDF(inputCol="wordsHashed",outputCol="features")
+
+# In[25]:
+from pyspark.ml import Pipeline
+from pyspark.ml.classification import RandomForestClassifier , LogisticRegression , NaiveBayes
+
+# In[26]:
+rf = RandomForestClassifier(labelCol="helpfulnessBucket",featuresCol="features",numTrees=10)
+
+# In[27]:
+rf_pipeline =  Pipeline(stages=[regexTokenizer,remover,hashingTF,idf,rf])
+
+# In[29]:
+rf_model = rf_pipeline.fit(train)
+
+# In[38]:
+rf_model.transform(test).select("helpfulnessBucket","prediction","helpful","probability").sort(desc("helpfulnessBucket")).show()
+
+# In[39]:
+from pyspark.ml.evaluation import MulticlassClassificationEvaluator
+
+# In[40]:
+eval = MulticlassClassificationEvaluator(labelCol="helpfulnessBucket",                                         predictionCol="prediction",                                         metricName="accuracy")
+
+# In[41]:
+eval.evaluate(rf_model.transform(test))
+
+# In[42]:
+eval.evaluate(rf_model.transform(train))
+
+# In[43]:
+rf_model.transform(test)    .groupBy("helpfulnessBucket","prediction")    .count().sort(desc("helpfulnessBucket"),desc("prediction"))    .show(50)
+
+# In[44]:
+lr = LogisticRegression(maxIter=20,regParam=0.001,labelCol="helpfulnessBucket")
+
+# In[45]:
+lr_pipeline =  Pipeline(stages=[regexTokenizer,remover,hashingTF,idf,lr])
+
+# In[46]:
+lr_model = lr_pipeline.fit(train)
+
+# In[47]:
+lr_model.transform(test).select("helpfulnessBucket","prediction","helpful","probability").sort(desc("helpfulnessBucket")).show()
+
+# In[48]:
+eval.evaluate(lr_model.transform(test))
+
+# In[49]:
+eval.evaluate(lr_model.transform(train))
+
+# In[50]:
+lr_model.transform(test)    .groupBy("helpfulnessBucket","prediction")    .count().sort(desc("helpfulnessBucket"),desc("prediction"))    .show(50)
+
+# In[51]:
+nb = NaiveBayes(labelCol="helpfulnessBucket",featuresCol="features")
+
+# In[52]:
+nb_pipeline =  Pipeline(stages=[regexTokenizer,remover,hashingTF,idf,nb])
+
+# In[53]:
+nb_model = nb_pipeline.fit(train)
+
+# In[54]:
+nb_model.transform(test).select("helpfulnessBucket","prediction","helpful","probability").sort(desc("helpfulnessBucket")).show()
+
+# In[55]:
+eval.evaluate(nb_model.transform(test))
+
+# In[56]:
+eval.evaluate(nb_model.transform(train))
+
+# In[57]:
+nb_model.transform(test)    .groupBy("helpfulnessBucket","prediction")    .count().sort(desc("helpfulnessBucket"),desc("prediction"))    .show(50)
