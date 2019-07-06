@@ -1,0 +1,1452 @@
+!pip install kaggle
+!pip install imgaug
+
+# TensorFlow and tf.keras
+import tensorflow as tf
+from tensorflow import keras
+
+# Helper libraries
+import numpy as np
+import matplotlib.pyplot as plt
+
+#print(tf.__version__)
+
+import sys
+from keras.utils import Sequence
+from PIL import Image
+import pandas as pd
+from tqdm import tqdm
+import imgaug as ia
+from imgaug import augmenters as iaa
+import cv2
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
+import scipy.optimize as opt
+
+import io, os
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+%matplotlib inline
+from PIL import Image
+from scipy.misc import imread
+
+
+from zipfile import ZipFile
+import re
+
+from googleapiclient.discovery import build
+import io, os
+from googleapiclient.http import MediaIoBaseDownload
+from google.colab import auth
+auth.authenticate_user()
+drive_service = build('drive', 'v3')
+results = drive_service.files().list(
+        q="name = 'kaggle.json'", fields="files(id)").execute()
+kaggle_api_key = results.get('files', [])
+filename = "/root/.kaggle/kaggle.json"
+os.makedirs(os.path.dirname(filename), exist_ok=True)
+request = drive_service.files().get_media(fileId=kaggle_api_key[0]['id'])
+fh = io.FileIO(filename, 'wb')
+downloader = MediaIoBaseDownload(fh, request)
+done = False
+while done is False:
+    status, done = downloader.next_chunk()
+    print("Download %d%%." % int(status.progress() * 100))
+os.chmod(filename, 600)
+
+!kaggle competitions download -c human-protein-atlas-image-classification
+
+#Extract all Green Filter Test Images
+
+path = 'test/'
+
+Zip = ZipFile('test.zip')
+for info in Zip.infolist():
+  if re.match(r'.*_green.*\.png$', info.filename):
+    #print (info.filename)
+    Zip.extract(info,path )
+
+os.remove("test.zip")
+
+#Extract all Green Filter Train Images
+
+path = 'train/'
+
+Zip = ZipFile('train.zip')
+for info in Zip.infolist():
+  if re.match(r'.*_green.*\.png$', info.filename):
+    #print (info.filename)
+    Zip.extract(info,path )
+
+os.remove("train.zip")
+
+train_labels = pd.read_csv("train.csv")
+train_labels.head()
+
+train_labels.shape[0]
+
+import pandas as pd
+train_labels = pd.read_csv('train.csv', sep=',')
+
+train_labels.Id.head()
+
+label_names = {
+    0:  "Nucleoplasm",  
+    1:  "Nuclear membrane",   
+    2:  "Nucleoli",   
+    3:  "Nucleoli fibrillar center",   
+    4:  "Nuclear speckles",
+    5:  "Nuclear bodies",   
+    6:  "Endoplasmic reticulum",   
+    7:  "Golgi apparatus",   
+    8:  "Peroxisomes",   
+    9:  "Endosomes",   
+    10:  "Lysosomes",   
+    11:  "Intermediate filaments",   
+    12:  "Actin filaments",   
+    13:  "Focal adhesion sites",   
+    14:  "Microtubules",   
+    15:  "Microtubule ends",   
+    16:  "Cytokinetic bridge",   
+    17:  "Mitotic spindle",   
+    18:  "Microtubule organizing center",   
+    19:  "Centrosome",   
+    20:  "Lipid droplets",   
+    21:  "Plasma membrane",   
+    22:  "Cell junctions",   
+    23:  "Mitochondria",   
+    24:  "Aggresome",   
+    25:  "Cytosol",   
+    26:  "Cytoplasmic bodies",   
+    27:  "Rods & rings"
+}
+
+reverse_train_labels = dict((v,k) for k,v in label_names.items())
+
+train_labels[f'target_vec'] = train_labels['Target'].map(lambda x: list(map(int, x.strip().split())))
+for i in range(28):
+    train_labels[f'{label_names[i]}'] = train_labels['Target'].map(
+             lambda x: 1 if str(i) in x.strip().split() else 0)
+train_labels.head()
+
+# reverse_train_labels = dict((v,k) for k,v in label_names.items())
+
+# def fill_targets(row):
+  #  row.Target = np.array(row.Target.split(" ")).astype(np.int)
+   # for num in row.Target:
+    #    name = label_names[int(num)]
+     #   row.loc[name] = 1
+   # return row
+   
+
+# Protein that occur most often in images
+# for key in class_names.keys():
+   # train_labels[class_names[key]] = 0
+
+# train_labels = train_labels.apply(fill_targets, axis=1)
+# train_labels.head()
+
+flatui = ["#0bdebf", "#058687", "#112e40ff", "#ed553b", “#ffffff"]
+sns.palplot(sns.
+colors = ["aqua", "turquoise", "bluegreen", "very dark blue", "orangey red"]
+sns.palplot(sns.xkcd_palette(colors))
+sns.set_palette(sns.xkcd_palette(colors))
+sns.set_style("whitegrid")
+
+
+train_labels["number_of_targets"] = train_labels.drop(["Id", "Target"],axis=1).sum(axis=1)
+count_perc = np.round(100 * train_labels["number_of_targets"].value_counts() / train_labels.shape[0], 2)
+plt.figure(figsize=(20,5))
+sns.barplot(x=count_perc.index.values, y=count_perc.values)
+plt.xlabel("Number of targets per image")
+plt.ylabel("% of data")
+
+# Correlation between proteins
+import seaborn as sns
+plt.figure(figsize=(15,15))
+sns.heatmap(train_labels[train_labels.number_of_targets>1].drop(
+    ["Id", "Target", "number_of_targets"],axis=1
+).corr(), cmap="GnBu", vmin=-1, vmax=1)
+
+# Agreesomes
+def find_counts(special_target, labels):
+    counts = labels[labels[special_target] == 1].drop(
+        ["Id", "Target", "number_of_targets"],axis=1
+    ).sum(axis=0)
+    counts = counts[counts > 0]
+    counts = counts.sort_values()
+    return counts
+
+
+aggresomeCount = find_counts("Aggresome", train_labels)
+
+plt.figure(figsize=(10,3))
+sns.barplot(x=aggresomeCount.values,y=aggresomeCount.index.values, palette="Spectral")
+
+import pandas as pd
+import numpy as np
+import os
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score
+import scipy.optimize as opt
+
+# train_path = "train"
+
+# def load_image(basepath, image_id):
+  #  images = np.zeros(shape=(4,512,512))
+  #  images[0,:,:] = imread(basepath + image_id + "_green" + ".png")
+  #  images[1,:,:] = imread(basepath + image_id + "_red" + ".png")
+  #  images[2,:,:] = imread(basepath + image_id + "_blue" + ".png")
+  #  images[3,:,:] = imread(basepath + image_id + "_yellow" + ".png")
+  #  return images
+
+# def make_image_row(image, subax, title):
+  #  subax[0].imshow(image[0], cmap="Greens")
+  #  subax[1].imshow(image[1], cmap="Reds")
+  #  subax[1].set_title("stained microtubules")
+  #  subax[2].imshow(image[2], cmap="Blues")
+  #  subax[2].set_title("stained nucleus")
+  #  subax[3].imshow(image[3], cmap="Oranges")
+  #  subax[3].set_title("stained endoplasmatic reticulum")
+  #  subax[0].set_title(title)
+  #  return subax
+
+# def make_title(file_id):
+  #  file_targets = train_labels.loc[train_labels.Id==file_id, "Target"].values[0]
+  #  title = " - "
+  #  for n in file_targets:
+   #     title += label_names[n] + " - "
+   # return title
+   
+
+# class TargetGroupIterator:
+    
+    #def __init__(self, target_names, batch_size, basepath):
+     #   self.target_names = target_names
+     #  self.target_list = [reverse_train_labels[key] for key in target_names]
+     #   self.batch_shape = (batch_size, 4, 512, 512)
+     #   self.basepath = basepath
+    
+   # def find_matching_data_entries(self):
+     #   train_labels["check_col"] = train_labels.Target.apply(
+     #       lambda l: self.check_subset(l)
+     #   )
+     #   self.images_identifier = train_labels[train_labels.check_col==1].Id.values
+     #   train_labels.drop("check_col", axis=1, inplace=True)
+    
+ #  def check_subset(self, targets):
+     #   return np.where(set(targets).issubset(set(self.target_list)), 1, 0)
+    
+  #  def get_loader(self):
+     #   filenames = []
+     #   idx = 0
+     #   images = np.zeros(self.batch_shape)
+     #   for image_id in self.images_identifier:
+     #       images[idx,:,:,:] = load_image(self.basepath, image_id)
+     #       filenames.append(image_id)
+     #      idx += 1
+     #      if idx == self.batch_shape[0]:
+     #           yield filenames, images
+     #          filenames = []
+     #           images = np.zeros(self.batch_shape)
+     #           idx = 0
+     #   if idx > 0:
+     #       yield filenames, images
+
+# your_choice = ["Lysosomes", "Endosomes"]
+# your_batch_size = 3
+
+#imageloader = TargetGroupIterator(your_choice, your_batch_size, train_path)
+#imageloader.find_matching_data_entries()
+#iterator = imageloader.get_loader()
+
+#file_ids, images = next(iterator)
+
+#fig, ax = plt.subplots(len(file_ids),4,figsize=(20,5*len(file_ids)))
+#if ax.shape == (4,):
+ #   ax = ax.reshape(1,-1)
+#for n in range(len(file_ids)):
+ #   make_image_row(images[n], ax[n], make_title(file_ids[n]))
+
+import sys
+import numpy as np
+import keras
+from keras.utils import Sequence
+from PIL import Image
+from matplotlib import pyplot as plt
+import pandas as pd
+from tqdm import tqdm
+import os
+import imgaug as ia
+from imgaug import augmenters as iaa
+import cv2
+
+class_index = 24  # Aggresomes
+aggresome_labels = train_labels[train_labels[label_names[class_index]] == 1]
+print(f'shape before {train_labels.shape}, shape after {aggresome_labels.shape}')
+aggresome_labels.head()
+
+BATCH_SIZE = 128
+SEED = 777
+SHAPE = (512, 512,1)
+DIR = './'
+VAL_RATIO = 0.1 # 10 % as validation
+THRESHOLD = 0.05 # due to different cost of True Positive vs False Positive, this is the probability threshold to predict the class as 'yes'
+
+ia.seed(SEED)
+
+def getTrainDataset():
+    
+    path_to_train = DIR + '/train/'
+    data = aggresome_labels
+
+    paths = []
+    labels = []
+    
+    for name, lbl in zip(data['Id'], data['Target'].str.split(' ')):
+        y = np.zeros(28)
+        for key in lbl:
+            y[int(key)] = 1
+        paths.append(os.path.join(path_to_train, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+def getTestDataset():
+    
+    path_to_test = DIR + '/test/'
+    data = pd.read_csv(DIR + '/sample_submission.csv')
+
+    paths = []
+    labels = []
+    
+    for name in data['Id']:
+        y = np.ones(28)
+        paths.append(os.path.join(path_to_test, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+class ProteinDataGenerator(keras.utils.Sequence):
+            
+    def __init__(self, paths, labels, batch_size, shape, shuffle = False, use_cache = False, augment = False):
+        self.paths, self.labels = paths, labels
+        self.batch_size = batch_size
+        self.shape = shape
+        self.shuffle = shuffle
+        self.use_cache = use_cache
+        self.augment = augment
+        if use_cache == True:
+            self.cache = np.zeros((paths.shape[0], shape[0], shape[1], shape[2]), dtype=np.float16)
+            self.is_cached = np.zeros((paths.shape[0]))
+        self.on_epoch_end()
+    
+    def __len__(self):
+        return int(np.ceil(len(self.paths) / float(self.batch_size)))
+    
+    def __getitem__(self, idx):
+        indexes = self.indexes[idx * self.batch_size : (idx+1) * self.batch_size]
+
+        paths = self.paths[indexes]
+        X = np.zeros((paths.shape[0], self.shape[0], self.shape[1], self.shape[2]))
+        # Generate data
+        if self.use_cache == True:
+            X = self.cache[indexes]
+            for i, path in enumerate(paths[np.where(self.is_cached[indexes] == 0)]):
+                image = self.__load_image(path)
+                self.is_cached[indexes[i]] = 1
+                self.cache[indexes[i]] = image
+                X[i] = image
+        else:
+            for i, path in enumerate(paths):
+                X[i] = self.__load_image(path)
+
+        y = self.labels[indexes]
+                
+        if self.augment == True:
+            seq = iaa.Sequential([
+                iaa.OneOf([
+                    iaa.Fliplr(0.5), # horizontal flips
+                    iaa.Crop(percent=(0, 0.1)), # random crops
+                    # Small gaussian blur with random sigma between 0 and 0.5.
+                    # But we only blur about 50% of all images.
+                    iaa.Sometimes(0.5,
+                        iaa.GaussianBlur(sigma=(0, 0.5))
+                    ),
+                    # Strengthen or weaken the contrast in each image.
+                    iaa.ContrastNormalization((0.75, 1.5)),
+                    # Add gaussian noise.
+                    # For 50% of all images, we sample the noise once per pixel.
+                    # For the other 50% of all images, we sample the noise per pixel AND
+                    # channel. This can change the color (not only brightness) of the
+                    # pixels.
+                    iaa.AdditiveGaussianNoise(loc=0, scale=(0.0, 0.05*255), per_channel=0.5),
+                    # Make some images brighter and some darker.
+                    # In 20% of all cases, we sample the multiplier once per channel,
+                    # which can end up changing the color of the images.
+                    iaa.Multiply((0.8, 1.2), per_channel=0.2),
+                    # Apply affine transformations to each image.
+                    # Scale/zoom them, translate/move them, rotate them and shear them.
+                    iaa.Affine(
+                        scale={"x": (0.8, 1.2), "y": (0.8, 1.2)},
+                        translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)},
+                        rotate=(-180, 180),
+                        shear=(-8, 8)
+                    )
+                ])], random_order=True)
+
+            X = np.concatenate((X, seq.augment_images(X), seq.augment_images(X), seq.augment_images(X)), 0)
+            y = np.concatenate((y, y, y, y), 0)
+        
+        return X, y
+    
+    def on_epoch_end(self):
+        
+        # Updates indexes after each epoch
+        self.indexes = np.arange(len(self.paths))
+        if self.shuffle == True:
+            np.random.shuffle(self.indexes)
+
+    def __iter__(self):
+        """Create a generator that iterate over the Sequence."""
+        for item in (self[i] for i in range(len(self))):
+            yield item
+            
+    def __load_image(self, path):
+        G = Image.open(path + '_green.png')
+
+        im = np.array(G)
+        
+        im = im.reshape([512, 512,1])
+        im = np.divide(im, 255)
+        return im
+ 
+ from keras.preprocessing.image import ImageDataGenerator
+from keras.models import Sequential, load_model, Model
+from keras.layers import Activation, Dropout, Flatten, Dense, Input, Conv2D, MaxPooling2D, BatchNormalization, Concatenate, ReLU, LeakyReLU
+from keras.callbacks import ModelCheckpoint, LearningRateScheduler, EarlyStopping, ReduceLROnPlateau
+from keras import metrics
+from keras.optimizers import Adam
+from keras.callbacks import ModelCheckpoint
+from keras import backend as K
+import keras
+import tensorflow as tf
+
+from tensorflow import set_random_seed
+set_random_seed(SEED)
+
+def f1(y_true, y_pred):
+    #y_pred = K.round(y_pred)
+    y_pred = K.cast(K.greater(K.clip(y_pred, 0, 1), THRESHOLD), K.floatx())
+    tp = K.sum(K.cast(y_true*y_pred, 'float'), axis=0)
+    tn = K.sum(K.cast((1-y_true)*(1-y_pred), 'float'), axis=0)
+    fp = K.sum(K.cast((1-y_true)*y_pred, 'float'), axis=0)
+    fn = K.sum(K.cast(y_true*(1-y_pred), 'float'), axis=0)
+
+    p = tp / (tp + fp + K.epsilon())
+    r = tp / (tp + fn + K.epsilon())
+
+    f1 = 2*p*r / (p+r+K.epsilon())
+    f1 = tf.where(tf.is_nan(f1), tf.zeros_like(f1), f1)
+    return K.mean(f1)
+
+def f1_loss(y_true, y_pred):
+    
+    #y_pred = K.cast(K.greater(K.clip(y_pred, 0, 1), THRESHOLD), K.floatx())
+    tp = K.sum(K.cast(y_true*y_pred, 'float'), axis=0)
+    tn = K.sum(K.cast((1-y_true)*(1-y_pred), 'float'), axis=0)
+    fp = K.sum(K.cast((1-y_true)*y_pred, 'float'), axis=0)
+    fn = K.sum(K.cast(y_true*(1-y_pred), 'float'), axis=0)
+
+    p = tp / (tp + fp + K.epsilon())
+    r = tp / (tp + fn + K.epsilon())
+
+    f1 = 2*p*r / (p+r+K.epsilon())
+    f1 = tf.where(tf.is_nan(f1), tf.zeros_like(f1), f1)
+    return 1-K.mean(f1)
+
+def create_model(input_shape):
+    
+    dropRate = 0.25
+    
+    init = Input(input_shape)
+    x = BatchNormalization(axis=-1)(init)
+    x = Conv2D(8, (3, 3), padding="same", input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(16, (3, 3), padding="same")(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Flatten()(x)
+    x = Dense(28, activation='relu')(x)
+    x = Dropout(0.7)(x)
+    x = Dense(28, activation='softmax')(x)
+    
+    model = Model(init, x)
+    
+    return model
+
+model = create_model(SHAPE)
+model.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+model.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+history = model.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+    
+ 
+ # Evaluation of accuracy
+test_loss, test_acc = model.evaluate(??????)
+
+print('Test accuracy:', test_acc)
+
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = history.history['acc']
+loss = history.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+class_index = 0  # Nuecloplasm
+neuplasm_labels = train_labels[train_labels[label_names[class_index]] == 1]
+print(f'shape before {train_labels.shape}, shape after {neuplasm_labels.shape}')
+neuplasm_labels.head()
+
+BATCH_SIZE = 128
+SEED = 777
+SHAPE = (512, 512,1)
+DIR = './'
+VAL_RATIO = 0.1 # 10 % as validation
+THRESHOLD = 0.05 # due to different cost of True Positive vs False Positive, this is the probability threshold to predict the class as 'yes'
+
+ia.seed(SEED)
+
+def getTrainDataset():
+    
+    path_to_train = DIR + '/train/'
+    data = neuplasm_labels
+
+    paths = []
+    labels = []
+    
+    for name, lbl in zip(data['Id'], data['Target'].str.split(' ')):
+        y = np.zeros(28)
+        for key in lbl:
+            y[int(key)] = 1
+        paths.append(os.path.join(path_to_train, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+def getTestDataset():
+    
+    path_to_test = DIR + '/test/'
+    data = pd.read_csv(DIR + '/sample_submission.csv')
+
+    paths = []
+    labels = []
+    
+    for name in data['Id']:
+        y = np.ones(28)
+        paths.append(os.path.join(path_to_test, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+model2 = create_model(SHAPE)
+model2.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+model2.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+history2 = model2.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = history2.history['acc']
+loss = history2.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+class_index = 11  # Intermediate Fillament
+intmedFil_labels = train_labels[train_labels[label_names[class_index]] == 1]
+print(f'shape before {train_labels.shape}, shape after {intmedFil_labels.shape}')
+intmedFil_labels.head()
+
+BATCH_SIZE = 128
+SEED = 777
+SHAPE = (512, 512,1)
+DIR = './'
+VAL_RATIO = 0.1 # 10 % as validation
+THRESHOLD = 0.05 # due to different cost of True Positive vs False Positive, this is the probability threshold to predict the class as 'yes'
+
+ia.seed(SEED)
+
+def getTrainDataset():
+    
+    path_to_train = DIR + '/train/'
+    data = intmedFil_labels
+
+    paths = []
+    labels = []
+    
+    for name, lbl in zip(data['Id'], data['Target'].str.split(' ')):
+        y = np.zeros(28)
+        for key in lbl:
+            y[int(key)] = 1
+        paths.append(os.path.join(path_to_train, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+def getTestDataset():
+    
+    path_to_test = DIR + '/test/'
+    data = pd.read_csv(DIR + '/sample_submission.csv')
+
+    paths = []
+    labels = []
+    
+    for name in data['Id']:
+        y = np.ones(28)
+        paths.append(os.path.join(path_to_test, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+model3 = create_model(SHAPE)
+model3.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+model3.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+history3 = model3.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = history3.history['acc']
+loss = history3.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+class_index = 18  # Microtubule Organizing Center
+micorgancentr_labels = train_labels[train_labels[label_names[class_index]] == 1]
+print(f'shape before {train_labels.shape}, shape after {micorgancentr_labels.shape}')
+micorgancentr_labels.head()
+
+BATCH_SIZE = 128
+SEED = 777
+SHAPE = (512, 512,1)
+DIR = './'
+VAL_RATIO = 0.1 # 10 % as validation
+THRESHOLD = 0.05 # due to different cost of True Positive vs False Positive, this is the probability threshold to predict the class as 'yes'
+
+ia.seed(SEED)
+
+def getTrainDataset():
+    
+    path_to_train = DIR + '/train/'
+    data = micorgancentr_labels
+
+    paths = []
+    labels = []
+    
+    for name, lbl in zip(data['Id'], data['Target'].str.split(' ')):
+        y = np.zeros(28)
+        for key in lbl:
+            y[int(key)] = 1
+        paths.append(os.path.join(path_to_train, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+def getTestDataset():
+    
+    path_to_test = DIR + '/test/'
+    data = pd.read_csv(DIR + '/sample_submission.csv')
+
+    paths = []
+    labels = []
+    
+    for name in data['Id']:
+        y = np.ones(28)
+        paths.append(os.path.join(path_to_test, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+    
+
+model4 = create_model(SHAPE)
+model4.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+model4.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+history4 = model4.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+    
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = history4.history['acc']
+loss = history4.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+class_index = 21  # Plasma Membrane
+plasmamemb_labels = train_labels[train_labels[label_names[class_index]] == 1]
+print(f'shape before {train_labels.shape}, shape after {plasmamemb_labels.shape}')
+plasmamemb_labels.head()
+
+BATCH_SIZE = 128
+SEED = 777
+SHAPE = (512, 512,1)
+DIR = './'
+VAL_RATIO = 0.1 # 10 % as validation
+THRESHOLD = 0.05 # due to different cost of True Positive vs False Positive, this is the probability threshold to predict the class as 'yes'
+
+ia.seed(SEED)
+
+def getTrainDataset():
+    
+    path_to_train = DIR + '/train/'
+    data = plasmamemb_labels
+
+    paths = []
+    labels = []
+    
+    for name, lbl in zip(data['Id'], data['Target'].str.split(' ')):
+        y = np.zeros(28)
+        for key in lbl:
+            y[int(key)] = 1
+        paths.append(os.path.join(path_to_train, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+def getTestDataset():
+    
+    path_to_test = DIR + '/test/'
+    data = pd.read_csv(DIR + '/sample_submission.csv')
+
+    paths = []
+    labels = []
+    
+    for name in data['Id']:
+        y = np.ones(28)
+        paths.append(os.path.join(path_to_test, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+    
+model5 = create_model(SHAPE)
+model5.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+model5.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+historty5 = model5.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+    
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = historty5.history['acc']
+loss = historty5.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+class_index = 22  # Cell Junction
+celljunct_labels = train_labels[train_labels[label_names[class_index]] == 1]
+print(f'shape before {train_labels.shape}, shape after {celljunct_labels.shape}')
+celljunct_labels.head()
+
+BATCH_SIZE = 128
+SEED = 777
+SHAPE = (512, 512,1)
+DIR = './'
+VAL_RATIO = 0.1 # 10 % as validation
+THRESHOLD = 0.05 # due to different cost of True Positive vs False Positive, this is the probability threshold to predict the class as 'yes'
+
+ia.seed(SEED)
+
+def getTrainDataset():
+    
+    path_to_train = DIR + '/train/'
+    data = celljunct_labels
+
+    paths = []
+    labels = []
+    
+    for name, lbl in zip(data['Id'], data['Target'].str.split(' ')):
+        y = np.zeros(28)
+        for key in lbl:
+            y[int(key)] = 1
+        paths.append(os.path.join(path_to_train, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+def getTestDataset():
+    
+    path_to_test = DIR + '/test/'
+    data = pd.read_csv(DIR + '/sample_submission.csv')
+
+    paths = []
+    labels = []
+    
+    for name in data['Id']:
+        y = np.ones(28)
+        paths.append(os.path.join(path_to_test, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+    
+model6 = create_model(SHAPE)
+model6.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+model6.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+history6 = model6.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+    
+
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = history6.history['acc']
+loss = history6.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+samples = [6,8,9,10,12,13,14,15,16,17,18,20,22,24,26,27]
+train_samples = train_labels
+
+for row, index in train_samples.iterrows():
+  if any([i in train_samples.target_vec[row] for i in samples]):
+    continue
+  else:
+    train_samples = train_samples.drop([row])
+
+train_samples.head()
+train_samples.shape
+
+target_counts = train_samples.drop(["Id", "Target", "target_vec"],axis=1).sum(axis=0).sort_values(ascending=False)
+plt.figure(figsize=(15,15))
+sns.barplot(y=target_counts.index.values, x=target_counts.values, order=target_counts.index, palette="Spectral")
+
+BATCH_SIZE = 128
+SEED = 777
+SHAPE = (512, 512,1)
+DIR = './'
+VAL_RATIO = 0.1 # 10 % as validation
+THRESHOLD = 0.05 # due to different cost of True Positive vs False Positive, this is the probability threshold to predict the class as 'yes'
+
+ia.seed(SEED)
+
+def getTrainDataset():
+    
+    path_to_train = DIR + '/train/'
+    data = train_samples
+
+    paths = []
+    labels = []
+    
+    for name, lbl in zip(data['Id'], data['Target'].str.split(' ')):
+        y = np.zeros(28)
+        for key in lbl:
+            y[int(key)] = 1
+        paths.append(os.path.join(path_to_train, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+def getTestDataset():
+    
+    path_to_test = DIR + '/test/'
+    data = pd.read_csv(DIR + '/sample_submission.csv')
+
+    paths = []
+    labels = []
+    
+    for name in data['Id']:
+        y = np.ones(28)
+        paths.append(os.path.join(path_to_test, name))
+        labels.append(y)
+
+    return np.array(paths), np.array(labels)
+
+modelAll = create_model(SHAPE)
+modelAll.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+modelAll.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+historyAll = modelAll.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+    
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = historyAll.history['acc']
+loss = historyAll.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+
+# Model on all data with added features
+def create_model(input_shape):
+    
+    dropRate = 0.1
+    
+    init = Input(input_shape)
+    x = BatchNormalization(axis=-1)(init)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(16, (3, 3), padding="same")(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Flatten()(x)
+    x = Dense(28, activation='sigmoid')(x)
+    x = Dropout(0.7)(x)
+    x = Dense(28, activation='softmax')(x)
+    
+    model = Model(init, x)
+    
+    return model
+
+modelA = create_model(SHAPE)
+modelA.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+modelA.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+historyA = modelA.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+    
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = historyA.history['acc']
+loss = historyA.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+# Model on all data with added features
+def create_model(input_shape):
+    
+    dropRate = 0.1
+    
+    init = Input(input_shape)
+    x = BatchNormalization(axis=-1)(init)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(16, (3, 3), padding="same")(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Flatten()(x)
+    x = Dense(28, activation='sigmoid')(x)
+    x = Dropout(0.7)(x)
+    x = Dense(28, activation='softmax')(x)
+    
+    model = Model(init, x)
+    
+    return model
+
+modelB = create_model(SHAPE)
+modelB.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+modelB.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+historyB = modelB.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+    
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = historyB.history['acc']
+loss = historyB.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+
+# Model on all data with added features
+def create_model(input_shape):
+    
+    dropRate = 0.1
+    
+    init = Input(input_shape)
+    x = BatchNormalization(axis=-1)(init)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(8, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(16, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(28, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Conv2D(28, (3, 3), padding="same", activation='sigmoid', input_shape=[512,512,1])(x)
+    x = MaxPooling2D((2,2))(x)
+    x = Flatten()(x)
+    x = Dense(28, activation='sigmoid')(x)
+    x = Dropout(0.7)(x)
+    x = Dense(28, activation='softmax')(x)
+    
+    model = Model(init, x)
+    
+    return model
+    
+modelC = create_model(SHAPE)
+modelC.compile(
+    loss='binary_crossentropy',
+    optimizer=Adam(1e-03),
+    metrics=['acc',f1])
+
+modelC.summary()
+
+paths, labels = getTrainDataset()
+
+# divide to 
+keys = np.arange(paths.shape[0], dtype=np.int)  
+np.random.seed(SEED)
+np.random.shuffle(keys)
+lastTrainIndex = int((1-VAL_RATIO) * paths.shape[0])
+
+pathsTrain = paths[0:lastTrainIndex]
+labelsTrain = labels[0:lastTrainIndex]
+pathsVal = paths[lastTrainIndex:]
+labelsVal = labels[lastTrainIndex:]
+
+print(paths.shape, labels.shape)
+print(pathsTrain.shape, labelsTrain.shape, pathsVal.shape, labelsVal.shape)
+
+tg = ProteinDataGenerator(pathsTrain, labelsTrain, BATCH_SIZE, SHAPE, use_cache=True, augment = False, shuffle = False)
+vg = ProteinDataGenerator(pathsVal, labelsVal, BATCH_SIZE, SHAPE, use_cache=True, shuffle = False)
+
+# https://keras.io/callbacks/#modelcheckpoint
+checkpoint = ModelCheckpoint('./base.model', monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=False, mode='min', period=1)
+reduceLROnPlato = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1, mode='min')
+
+epochs = 15
+
+use_multiprocessing = False # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+workers = 1 # DO NOT COMBINE MULTIPROCESSING WITH CACHE! 
+
+historyC = modelC.fit_generator(
+    tg,
+    steps_per_epoch=len(tg),
+    validation_data=vg,
+    validation_steps=8,
+    epochs=epochs,
+    use_multiprocessing=use_multiprocessing,
+    workers=workers,
+    verbose=1,
+    callbacks=[checkpoint])
+    
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = historyC.history['acc']
+loss = historyC.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
