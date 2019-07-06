@@ -1,0 +1,798 @@
+import tensorflow as tf
+from tensorflow import keras 
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import Dropout
+from keras.utils import np_utils
+import matplotlib.pyplot as plt
+import numpy as np
+import matplotlib.pyplot as plt
+
+# loading of the data
+# image dimensions
+imageRow, imageColumn = 28, 28
+
+# splitting the data between testing and training sets as well as being loaded
+(x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
+
+print('training X shape:', x_train.shape, 'training y shape:', y_train.shape)
+
+# Initial plot of an item to see how the image displays
+plt.figure()
+plt.imshow(x_train[42326])
+plt.colorbar()
+plt.grid(False)
+
+plt.figure(figsize=(10,10))
+for i in range(25):
+    plt.subplot(5,5,i+1)
+    plt.xticks([])
+    plt.yticks([])
+    plt.grid(False)
+    plt.imshow(x_train[i], cmap=plt.cm.binary)
+    
+# As we are able to see from the images that printed out above, labels should be added to the images.
+item_name = ['T-shirt/top', 'Trouser', 'Pullover','Dress', 'Coat','Sandal','Shirt','Sneaker','Bag','Ankle Boot']
+
+plt.figure(figsize=(10,10))
+for i in range(25):
+    plt.subplot(5,5,i+1)
+    plt.xticks([])
+    plt.yticks([])
+    plt.grid(False)
+    plt.imshow(x_train[i], cmap=plt.cm.binary)
+    plt.xlabel(item_name[y_train[i]])
+
+# Pulling another item from the training set for further examination for posible preprocessing
+plt.figure()
+plt.imshow(x_train[59997])
+plt.colorbar()
+plt.grid(False)
+
+# the image above could be a dress
+# however, we can see that there are pixel values between 0 and 255.
+# we need to normalize these values to be within the range of 0 and 1. 
+# in order to create the model we can take the integer that the training images are and convert them to a float. 
+# then we can divide by 255, because that is how many pixels there are to normalize
+x_train = x_train / 255.0
+# we must also complete this on the test set as well for the neural network to work
+x_test = x_test / 255.0
+
+# we can then pull the first 25 images again from the training set and make sure that our labels match up to the items and all is correct
+plt.figure(figsize=(10,10))
+for i in range(25):
+    plt.subplot(5,5,i+1)
+    plt.xticks([])
+    plt.yticks([])
+    plt.grid(False)
+    plt.imshow(x_train[i], cmap=plt.cm.binary)
+    plt.xlabel(item_name[y_train[i]])
+
+# Keras
+# Building the model by first setting up the layers to extract representations of the items
+modelKeras = keras.Sequential([
+    keras.layers.Flatten(input_shape=(28,28)), # flattens the image from a 2-D array to a one dimensional array
+    keras.layers.Dense(128, activation = tf.nn.relu), # fully-connected neural layers, 128 nodes
+    keras.layers.Dense(10, activation = tf.nn.softmax) # fully-connected with 10 nodes (each node has a score that tells the probability that the current image belongs to one of the classes of clothing)
+])
+
+# adding more features to the model to determine accuracy during training, loss, metrics of accuracy used during training and testing to determine the fraction of the images that are correctly classified
+modelKeras.compile(optimizer=tf.train.AdamOptimizer(), 
+              loss='sparse_categorical_crossentropy',
+              metrics=['accuracy'])
+              
+# Training the Keras model
+% time
+history = modelKeras.fit(x_train, y_train, validation_data=(x_test, y_test), epochs=100)
+
+# Evaluation of accuracy
+test_loss, test_acc = modelKeras.evaluate(x_test, y_test)
+
+print('Test accuracy:', test_acc)
+
+import matplotlib.pyplot as plt
+%matplotlib inline
+accuracy = history.history['acc']
+loss = history.history['loss']
+epochs = range(len(accuracy))
+plt.plot(epochs, accuracy, 'bo', label='Training Accuracy')
+plt.legend()
+plt.figure()
+plt.plot(epochs, loss, 'bo', label='Training Loss')
+plt.legend()
+plt.show()
+
+# INTERPRET 
+# BUILD FUNCTION FOR PLOTTING THE RESULTS OF THE MODEL
+
+def plot_train_curve(history):
+    colors = ['#e66101','#fdb863','#b2abd2','#5e3c99']
+    accuracy = history.history['acc']
+    val_accuracy = history.history['val_acc']
+    loss = history.history['loss']
+    val_loss = history.history['val_loss']
+    epochs = range(len(accuracy))
+    with plt.style.context("ggplot"):
+        plt.figure(figsize=(8, 8/1.618))
+        plt.plot(epochs, accuracy, marker='o', c=colors[3], label='Training accuracy')
+        plt.plot(epochs, val_accuracy, c=colors[0], label='Validation accuracy')
+        plt.title('Training and validation accuracy')
+        plt.legend()
+        plt.figure(figsize=(8, 8/1.618))
+        plt.plot(epochs, loss, marker='o', c=colors[3], label='Training loss')
+        plt.plot(epochs, val_loss, c=colors[0], label='Validation loss')
+        plt.title('Training and validation loss')
+        plt.legend()
+        plt.show()
+    
+plot_train_curve(history)
+
+# Predictions with the trained model
+predKeras = modelKeras.predict(x_test)
+predKeras[0] # looking at the first prediction
+
+Each number within the array for the first predicition indicates the confidence of the model that the image corresponds to each of the different articles of clothing.
+
+# looking at the max confidence
+np.argmax(predKeras[0])
+
+# corresponding testing label
+y_test[0]
+
+The 9th category of artcle of clothing is classified as an ankle boot
+
+def plot_image(i, predictions_array, true_label, img):
+  predictions_array, true_label, img = predictions_array[i], true_label[i], img[i]
+  plt.grid(False)
+  plt.xticks([])
+  plt.yticks([])
+  
+  plt.imshow(img, cmap=plt.cm.binary)
+
+  predicted_label = np.argmax(predictions_array)
+  if predicted_label == true_label:
+    color = 'blue'
+  else:
+    color = 'red'
+  
+  plt.xlabel("{} {:2.0f}% ({})".format(item_name[predicted_label],
+                                100*np.max(predictions_array),
+                                item_name[true_label]),
+                                color=color)
+
+def plot_value_array(i, predictions_array, true_label):
+  predictions_array, true_label = predictions_array[i], true_label[i]
+  plt.grid(False)
+  plt.xticks([])
+  plt.yticks([])
+  thisplot = plt.bar(range(10), predictions_array, color="#777777")
+  plt.ylim([0, 1]) 
+  predicted_label = np.argmax(predictions_array)
+ 
+  thisplot[predicted_label].set_color('red')
+  thisplot[true_label].set_color('blue')
+  
+i = 9
+plt.figure(figsize=(6,3))
+plt.subplot(1,2,1)
+plot_image(i, predKeras, y_test, x_test)
+plt.subplot(1,2,2)
+plot_value_array(i, predKeras,  y_test)
+
+i = 0
+plt.figure(figsize=(6,3))
+plt.subplot(1,2,1)
+plot_image(i, predKeras, y_test, x_test)
+plt.subplot(1,2,2)
+plot_value_array(i, predKeras,  y_test)
+
+i = 500
+plt.figure(figsize=(6,3))
+plt.subplot(1,2,1)
+plot_image(i, predKeras, y_test, x_test)
+plt.subplot(1,2,2)
+plot_value_array(i, predKeras,  y_test)
+
+i = 9999
+plt.figure(figsize=(6,3))
+plt.subplot(1,2,1)
+plot_image(i, predKeras, y_test, x_test)
+plt.subplot(1,2,2)
+plot_value_array(i, predKeras,  y_test)
+
+i = 12
+plt.figure(figsize=(6,3))
+plt.subplot(1,2,1)
+plot_image(i, predKeras, y_test, x_test)
+plt.subplot(1,2,2)
+plot_value_array(i, predKeras,  y_test)
+
+num_rows = 5
+num_cols = 3
+num_images = num_rows*num_cols
+plt.figure(figsize=(2*2*num_cols, 2*num_rows))
+for i in range(num_images):
+  plt.subplot(num_rows, 2*num_cols, 2*i+1)
+  plot_image(i, predKeras, y_test, x_test)
+  plt.subplot(num_rows, 2*num_cols, 2*i+2)
+  plot_value_array(i, predKeras, y_test)
+
+import keras
+from keras.datasets import fashion_mnist
+
+import numpy as np
+
+import matplotlib.pyplot as plt
+%matplotlib inline
+
+(x_train, y_train), (x_test, y_test) = fashion_mnist.load_data()
+
+items = {0: 'T-shirt/top', 1: 'Trouser', 2: 'Pullover', 3: 'Dress', 4: 'Coat',
+           5: 'Sandal', 6: 'Shirt', 7: 'Sneaker', 8: 'Bag', 9: 'Ankle boot'}
+
+def plot_image(X, y=None):
+    if y is None:
+        y = 'unknown'
+    else:
+        y = items[y]
+    plt.title('Label is {label}'.format(label=y))
+    plt.imshow(X, cmap='gray')
+    plt.show()
+    
+plot_image(x_train[0], y_train[0])
+plot_image(x_train[1], y_train[1])
+plot_image(x_train[2], y_train[2])
+plot_image(x_train[3], y_train[3])
+
+# Scrubbing
+x_train_prep = x_train / 255
+x_test_prep = x_test / 255
+
+x_train_prep_1d = x_train_prep.reshape(-1, 28 * 28)
+x_test_prep_1d = x_test_prep.reshape(-1, 28 * 28)
+
+x_train_prep_3d = x_train_prep.reshape(-1, 28, 28, 1)
+x_test_prep_3d = x_test_prep.reshape(-1, 28, 28, 1)
+
+from sklearn.model_selection import GridSearchCV, cross_val_score
+from sklearn.metrics import confusion_matrix
+
+import heapq
+
+def find_example(model, x, y, true_class, predicted_class):
+    y_true = y
+    y_pred = model.predict(x)
+    found_index = None
+    for index, (current_y_true, current_y_pred) in enumerate(zip(y_true, y_pred)):
+        if current_y_true == true_class and current_y_pred == predicted_class:
+            found_index = index
+            break
+    return found_index
+
+def plot_example(model, x, y, true_class, predicted_class, value=None):
+    index = find_example(model, x, y, true_class, predicted_class)
+    print('True class:', items[true_class])
+    print('Predicted class:', items[predicted_class])
+    if value is not None:
+        print('Misclassified', value, 'times')
+    if index is not None:
+        plt.imshow(x_test_prep[index])
+        plt.show()
+    print('')
+    
+def analyze_model(model, x, y, inspect_n=10):
+    y_pred = model.predict(x)
+    conf_matrix = confusion_matrix(y, y_pred)
+    print('Confusion matrix:')
+    print(conf_matrix)
+    print('')
+    for _ in range(10):
+        conf_matrix[_][_] = 0
+    conf_matrix_flat = conf_matrix.reshape(-1, 1)
+    biggest_indices = heapq.nlargest(inspect_n, range(len(conf_matrix_flat)), conf_matrix_flat.take)
+    biggest_indices = np.unravel_index(biggest_indices, conf_matrix.shape)
+    highest_values = conf_matrix[biggest_indices]
+    for x_index, y_index, value in zip(biggest_indices[0], biggest_indices[1], highest_values):
+        plot_example(model, x, y, x_index, y_index, value)
+
+# Logistic Regression
+
+from sklearn.linear_model import LogisticRegression
+
+% time
+logistic_regression = LogisticRegression(multi_class='multinomial', solver='lbfgs')
+logistic_param_grid = {'C': [0.001, 0.01, 0.1, 1., 10., 100.]}
+lr_gridsearch = GridSearchCV(cv=4, estimator=logistic_regression, param_grid=logistic_param_grid, scoring='accuracy')
+lr_gridsearch.fit(x_train_prep_1d, y_train)
+
+print(lr_gridsearch.best_params_)
+print(lr_gridsearch.best_score_)
+
+analyze_model(lr_gridsearch, x_test_prep_1d, y_test)
+
+# Naive Bayes
+from sklearn.naive_bayes import GaussianNB
+
+naive_bayes = GaussianNB()
+print(np.mean(cross_val_score(estimator=naive_bayes, cv=200, scoring='accuracy', X=x_train_prep_1d, y=y_train)))
+% time
+naive_bayes.fit(x_train_prep_1d, y_train)
+
+analyze_model(naive_bayes, x_test_prep_1d, y_test)
+
+# Convolutional Model pooling 5 layers and 2 dense layers 0.1 dropout
+from keras.models import Sequential
+from keras.layers import Conv2D, MaxPooling2D, Dense, Flatten, Dropout
+from keras.optimizers import Adam
+from keras.metrics import sparse_categorical_accuracy, sparse_categorical_crossentropy
+
+class ConvModel:
+    def __init__(self, model):
+        self.model = model
+        
+    def fit(self, X, y, **kwargs):
+        self.model.fit(X, y, **kwargs)
+        
+    def predict(self, X):
+        return np.argmax(self.model.predict(X), axis=1)
+
+    def predict_proba(self, X):
+        return self.model.predict(X)
+
+% time
+model_6c_2d_2p_do10 = Sequential()
+model_6c_2d_2p_do10.add(Conv2D(64, (3, 3), activation='sigmoid', input_shape=(28, 28, 1)))
+model_6c_2d_2p_do10.add(Dropout(0.1))
+model_6c_2d_2p_do10.add(Conv2D(64, (3, 3), activation='sigmoid', input_shape=(28, 28, 1)))
+model_6c_2d_2p_do10.add(MaxPooling2D(pool_size=(2, 2)))
+model_6c_2d_2p_do10.add(Dropout(0.1))
+model_6c_2d_2p_do10.add(Conv2D(64, (3, 3), activation='sigmoid'))
+model_6c_2d_2p_do10.add(MaxPooling2D(pool_size=(2, 2)))
+model_6c_2d_2p_do10.add(Dropout(0.1))
+model_6c_2d_2p_do10.add(Conv2D(128, (3, 3), activation='sigmoid'))
+model_6c_2d_2p_do10.add(Dropout(0.1))
+model_6c_2d_2p_do10.add(Conv2D(128, (3, 3), activation='sigmoid'))
+model_6c_2d_2p_do10.add(Flatten())
+model_6c_2d_2p_do10.add(Dense(64, activation='sigmoid'))
+model_6c_2d_2p_do10.add(Dropout(0.1))
+model_6c_2d_2p_do10.add(Dense(10, activation='softmax'))
+
+optimizer = Adam()
+model_6c_2d_2p_do10.compile(loss='sparse_categorical_crossentropy', optimizer=optimizer, metrics=[sparse_categorical_accuracy])
+
+conv_model_6c_2d_2p_do10 = ConvModel(model_6c_2d_2p_do10)
+conv_model_6c_2d_2p_do10.fit(x_train_prep_3d, y_train, batch_size=32, epochs=100, validation_data=(x_test_prep_3d, y_test))
+
+analyze_model(conv_model_6c_2d_2p_do10, x_test_prep_3d, y_test)
+
+# MLP
+import os
+import struct
+import numpy as np
+import pandas
+
+import time
+import matplotlib.pyplot as plt
+%matplotlib inline
+
+# loading of the data
+# image dimensions
+imageRow, imageColumn = 28, 28
+
+# splitting the data between testing and training sets as well as being loaded
+(x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
+print('training X shape:', x_train.shape, 'training y shape:', y_train.shape)
+
+# VISUALIZE EACH OF THE ITEMS OF CLOTHING
+
+fig, ax = plt.subplots(nrows=2, ncols=5, sharex=True, sharey=True,)
+ax = ax.flatten()
+for i in range(10):
+    img = x_train[y_train == i][0].reshape(28, 28)
+    ax[i].imshow(img, cmap='Greys', interpolation='nearest')
+
+ax[0].set_xticks([])
+ax[0].set_yticks([])
+plt.tight_layout()
+plt.show()
+
+# VISUALIZE DIFFERENT VARIATIONS OF Sandals
+
+fig, ax = plt.subplots(nrows=5, ncols=4, sharex=True, sharey=True,)
+ax = ax.flatten()
+for i in range(20):
+    img = x_train[y_train == 5][i].reshape(28, 28)
+    ax[i].imshow(img, cmap='Greys', interpolation='nearest')
+
+ax[0].set_xticks([])
+ax[0].set_yticks([])
+plt.tight_layout()
+# plt.savefig('./figures/mnist_9.png', dpi=300)
+plt.show()
+
+# FIRST PASS WITH MLP
+
+import numpy as np
+from scipy.special import expit
+import sys
+
+
+class NeuralNetMLP(object):
+    """ Feedforward neural network / Multi-layer perceptron classifier.
+
+    Parameters
+    ------------
+    n_output : int
+      Number of output units, should be equal to the
+      number of unique class labels.
+
+    n_features : int
+      Number of features (dimensions) in the target dataset.
+      Should be equal to the number of columns in the X array.
+
+    n_hidden : int (default: 30)
+      Number of hidden units.
+
+    l1 : float (default: 0.0)
+      Lambda value for L1-regularization.
+      No regularization if l1=0.0 (default)
+
+    l2 : float (default: 0.0)
+      Lambda value for L2-regularization.
+      No regularization if l2=0.0 (default)
+
+    epochs : int (default: 500)
+      Number of passes over the training set.
+
+    eta : float (default: 0.001)
+      Learning rate.
+
+    alpha : float (default: 0.0)
+      Momentum constant. Factor multiplied with the
+      gradient of the previous epoch t-1 to improve
+      learning speed
+      w(t) := w(t) - (grad(t) + alpha*grad(t-1))
+    
+    decrease_const : float (default: 0.0)
+      Decrease constant. Shrinks the learning rate
+      after each epoch via eta / (1 + epoch*decrease_const)
+
+    shuffle : bool (default: True)
+      Shuffles training data every epoch if True to prevent circles.
+
+    minibatches : int (default: 1)
+      Divides training data into k minibatches for efficiency.
+      Normal gradient descent learning if k=1 (default).
+
+    random_state : int (default: None)
+      Set random state for shuffling and initializing the weights.
+
+    Attributes
+    -----------
+    cost_ : list
+      Sum of squared errors after each epoch.
+
+    """
+    def __init__(self, n_output, n_features, n_hidden=30,
+                 l1=0.0, l2=0.0, epochs=500, eta=0.001, 
+                 alpha=0.0, decrease_const=0.0, shuffle=True, 
+                 minibatches=1, random_state=None):
+
+        np.random.seed(random_state)
+        self.n_output = n_output
+        self.n_features = n_features
+        self.n_hidden = n_hidden
+        self.w1, self.w2 = self._initialize_weights()
+        self.l1 = l1
+        self.l2 = l2
+        self.epochs = epochs
+        self.eta = eta
+        self.alpha = alpha
+        self.decrease_const = decrease_const
+        self.shuffle = shuffle
+        self.minibatches = minibatches
+
+    def _encode_labels(self, y, k):
+        """Encode labels into one-hot representation
+
+        Parameters
+        ------------
+        y : array, shape = [n_samples]
+            Target values.
+
+        Returns
+        -----------
+        onehot : array, shape = (n_labels, n_samples)
+
+        """
+        onehot = np.zeros((k, y.shape[0]))
+        for idx, val in enumerate(y):
+            onehot[val, idx] = 1.0
+        return onehot
+
+    def _initialize_weights(self):
+        """Initialize weights with small random numbers."""
+        w1 = np.random.uniform(-1.0, 1.0, size=self.n_hidden*(self.n_features + 1))
+        w1 = w1.reshape(self.n_hidden, self.n_features + 1)
+        w2 = np.random.uniform(-1.0, 1.0, size=self.n_output*(self.n_hidden + 1))
+        w2 = w2.reshape(self.n_output, self.n_hidden + 1)
+        return w1, w2
+
+    def _sigmoid(self, z):
+        """Compute logistic function (sigmoid)
+
+        Uses scipy.special.expit to avoid overflow
+        error for very small input values z.
+
+        """
+        # return 1.0 / (1.0 + np.exp(-z))
+        return expit(z)
+
+    def _sigmoid_gradient(self, z):
+        """Compute gradient of the logistic function"""
+        sg = self._sigmoid(z)
+        return sg * (1 - sg)
+
+    def _add_bias_unit(self, X, how='column'):
+        """Add bias unit (column or row of 1s) to array at index 0"""
+        if how == 'column':
+            X_new = np.ones((X.shape[0], X.shape[1]+1))
+            X_new[:, 1:] = X
+        elif how == 'row':
+            X_new = np.ones((X.shape[0]+1, X.shape[1]))
+            X_new[1:, :] = X
+        else:
+            raise AttributeError('`how` must be `column` or `row`')
+        return X_new
+
+    def _feedforward(self, X, w1, w2):
+        """Compute feedforward step
+
+        Parameters
+        -----------
+        X : array, shape = [n_samples, n_features]
+          Input layer with original features.
+
+        w1 : array, shape = [n_hidden_units, n_features]
+          Weight matrix for input layer -> hidden layer.
+
+        w2 : array, shape = [n_output_units, n_hidden_units]
+          Weight matrix for hidden layer -> output layer.
+
+        Returns
+        ----------
+        a1 : array, shape = [n_samples, n_features+1]
+          Input values with bias unit.
+
+        z2 : array, shape = [n_hidden, n_samples]
+          Net input of hidden layer.
+
+        a2 : array, shape = [n_hidden+1, n_samples]
+          Activation of hidden layer.
+
+        z3 : array, shape = [n_output_units, n_samples]
+          Net input of output layer.
+
+        a3 : array, shape = [n_output_units, n_samples]
+          Activation of output layer.
+
+        """
+        a1 = self._add_bias_unit(X, how='column')
+        z2 = w1.dot(a1.T)
+        a2 = self._sigmoid(z2)
+        a2 = self._add_bias_unit(a2, how='row')
+        z3 = w2.dot(a2)
+        a3 = self._sigmoid(z3)
+        return a1, z2, a2, z3, a3
+
+    def _L2_reg(self, lambda_, w1, w2):
+        """Compute L2-regularization cost"""
+        return (lambda_/2.0) * (np.sum(w1[:, 1:] ** 2) + np.sum(w2[:, 1:] ** 2))
+
+    def _L1_reg(self, lambda_, w1, w2):
+        """Compute L1-regularization cost"""
+        return (lambda_/2.0) * (np.abs(w1[:, 1:]).sum() + np.abs(w2[:, 1:]).sum())
+
+    def _get_cost(self, y_enc, output, w1, w2):
+        """Compute cost function.
+
+        y_enc : array, shape = (n_labels, n_samples)
+          one-hot encoded class labels.
+
+        output : array, shape = [n_output_units, n_samples]
+          Activation of the output layer (feedforward)
+
+        w1 : array, shape = [n_hidden_units, n_features]
+          Weight matrix for input layer -> hidden layer.
+
+        w2 : array, shape = [n_output_units, n_hidden_units]
+          Weight matrix for hidden layer -> output layer.
+
+        Returns
+        ---------
+        cost : float
+          Regularized cost.
+
+        """
+        term1 = -y_enc * (np.log(output))
+        term2 = (1 - y_enc) * np.log(1 - output)
+        cost = np.sum(term1 - term2)
+        L1_term = self._L1_reg(self.l1, w1, w2)
+        L2_term = self._L2_reg(self.l2, w1, w2)
+        cost = cost + L1_term + L2_term
+        return cost
+
+    def _get_gradient(self, a1, a2, a3, z2, y_enc, w1, w2):
+        """ Compute gradient step using backpropagation.
+
+        Parameters
+        ------------
+        a1 : array, shape = [n_samples, n_features+1]
+          Input values with bias unit.
+
+        a2 : array, shape = [n_hidden+1, n_samples]
+          Activation of hidden layer.
+
+        a3 : array, shape = [n_output_units, n_samples]
+          Activation of output layer.
+
+        z2 : array, shape = [n_hidden, n_samples]
+          Net input of hidden layer.
+
+        y_enc : array, shape = (n_labels, n_samples)
+          one-hot encoded class labels.
+
+        w1 : array, shape = [n_hidden_units, n_features]
+          Weight matrix for input layer -> hidden layer.
+
+        w2 : array, shape = [n_output_units, n_hidden_units]
+          Weight matrix for hidden layer -> output layer.
+
+        Returns
+        ---------
+
+        grad1 : array, shape = [n_hidden_units, n_features]
+          Gradient of the weight matrix w1.
+
+        grad2 : array, shape = [n_output_units, n_hidden_units]
+            Gradient of the weight matrix w2.
+
+        """
+        # backpropagation
+        sigma3 = a3 - y_enc
+        z2 = self._add_bias_unit(z2, how='row')
+        sigma2 = w2.T.dot(sigma3) * self._sigmoid_gradient(z2)
+        sigma2 = sigma2[1:, :]
+        grad1 = sigma2.dot(a1)
+        grad2 = sigma3.dot(a2.T)
+
+        # regularize
+        grad1[:, 1:] += (w1[:, 1:] * (self.l1 + self.l2))
+        grad2[:, 1:] += (w2[:, 1:] * (self.l1 + self.l2))
+
+        return grad1, grad2
+
+    def predict(self, X):
+        """Predict class labels
+
+        Parameters
+        -----------
+        X : array, shape = [n_samples, n_features]
+          Input layer with original features.
+
+        Returns:
+        ----------
+        y_pred : array, shape = [n_samples]
+          Predicted class labels.
+
+        """
+        if len(X.shape) != 2:
+            raise AttributeError('X must be a [n_samples, n_features] array.\n'
+                                 'Use X[:,None] for 1-feature classification,'
+                                 '\nor X[[i]] for 1-sample classification')
+
+        a1, z2, a2, z3, a3 = self._feedforward(X, self.w1, self.w2)
+        y_pred = np.argmax(z3, axis=0)
+        return y_pred
+
+    # FUNCTION FOR FITTING MLP 
+    
+    def fit(self, X, y, print_progress=False):
+        """ Learn weights from training data.
+
+        Parameters
+        -----------
+        X : array, shape = [n_samples, n_features]
+          Input layer with original features.
+
+        y : array, shape = [n_samples]
+          Target class labels.
+
+        print_progress : bool (default: False)
+          Prints progress as the number of epochs
+          to stderr.
+
+        Returns:
+        ----------
+        self
+
+        """
+        self.cost_ = []
+        X_data, y_data = X.copy(), y.copy()
+        y_enc = self._encode_labels(y, self.n_output)
+
+        delta_w1_prev = np.zeros(self.w1.shape)
+        delta_w2_prev = np.zeros(self.w2.shape)
+
+        for i in range(self.epochs):
+            
+            # adaptive learning rate
+            self.eta /= (1 + self.decrease_const*i)
+
+            if print_progress:
+                sys.stderr.write('\rEpoch: %d/%d' % (i+1, self.epochs))
+                sys.stderr.flush()
+
+            if self.shuffle:
+                idx = np.random.permutation(y_data.shape[0])
+                X_data, y_enc = X_data[idx], y_enc[:, idx]
+
+            mini = np.array_split(range(y_data.shape[0]), self.minibatches)
+            for idx in mini:
+
+                # feedforward
+                a1, z2, a2, z3, a3 = self._feedforward(X_data[idx], self.w1, self.w2)
+                cost = self._get_cost(y_enc=y_enc[:, idx],
+                                      output=a3,
+                                      w1=self.w1,
+                                      w2=self.w2)
+                self.cost_.append(cost)
+
+                # compute gradient via backpropagation
+                grad1, grad2 = self._get_gradient(a1=a1, a2=a2,
+                                                  a3=a3, z2=z2,
+                                                  y_enc=y_enc[:, idx],
+                                                  w1=self.w1,
+                                                  w2=self.w2)
+
+                delta_w1, delta_w2 = self.eta * grad1, self.eta * grad2
+                self.w1 -= (delta_w1 + (self.alpha * delta_w1_prev))
+                self.w2 -= (delta_w2 + (self.alpha * delta_w2_prev))
+                delta_w1_prev, delta_w2_prev = delta_w1, delta_w2
+
+        return self
+        
+#run a neural net. These are the different inputs for the classifier
+#defined above. Can take 10, 15, 20, 45 minutes to run 1000
+nn = NeuralNetMLP(n_output=10, #number of classes in the data set being examined (ex. for mnist 10 classes because 0,1,2,3,4,5,6,7,8,9). Note: this only works for fully labeled data sets.
+                  n_features=x_train.shape[1], 
+                  n_hidden=80, #try 30, 50, 80, generally more hidden layers is more accurate
+                  l2=0.1, #Regularization cost, adjusting your weights 
+                  l1=0.0, #Regularization cost, adjusting your weights 
+                  epochs=1000, #iterations (backward and forwarded passes)
+                  eta=0.001, #learning rate, how fast and slow you go up and down your optimization curve
+                  alpha=0.001, #multiplying to improve the speed (weights are multiplied by this alpha). Improving speed of how well your model learns
+                  decrease_const=0.00001,#if you made your learning rate too high, it will shrink your learning rate so it doesn't bounce around too much
+                  minibatches=50, #chunk up my training data into groups of 50 (speeds up the performance since there are so many)
+                  shuffle=True, #for each epoch, it shuffles
+                  random_state=1) #set value for making the shuffle
+                  
+#Time the results of the nn - results in seconds
+
+start = time.time()
+
+nn.fit(x_train, y_train, print_progress=True)
+
+end = time.time()
+final_time = end-start
+print(final_time)
+
+# ROUGH PLOT FOR EACH OF THE 50 BATCH RUNS
+
+plt.plot(range(len(nn.cost_)), nn.cost_)
+plt.ylim([0, 2000])
+plt.ylabel('Cost')
+plt.xlabel('Epochs * 50')
+plt.tight_layout()
+# plt.savefig('./figures/cost.png', dpi=300)
+plt.show()
